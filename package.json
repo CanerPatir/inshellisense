@@ -92,5 +92,10 @@
       "eslint --fix",
       "prettier --write"
     ]
+  },
+  "allowScripts": {
+    "node-pty@1.2.0-beta.8": true,
+    "esbuild@0.27.2": true,
+    "esbuild@0.25.12": true
   }
 }

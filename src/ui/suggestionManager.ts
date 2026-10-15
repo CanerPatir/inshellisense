@@ -39,6 +39,7 @@ export class SuggestionManager {
   #suggestBlob?: SuggestionBlob;
   #shell: Shell;
   #hideSuggestions: boolean = false;
+  #enterIntent: "none" | "typed" | "navigated" = "none";
   #abortController?: AbortController;
   #runtime?: Promise<SuggestionRuntime>;
   #requestVersion = 0;
@@ -220,10 +221,28 @@ export class SuggestionManager {
   }
 
   update(keyPress: KeyPress, allowBindings = true): boolean {
-    const { name, shift, ctrl } = keyPress;
-    if (name == "return") {
-      this.#term.clearCommand(); // clear the current command on enter
+    if (keyPress.name != "return") {
+      this.#enterIntent = "typed";
     }
+    const handled = this._handleKeyPress(keyPress, allowBindings);
+    if (!handled && keyPress.name == "return") {
+      this.#term.clearCommand(); // clear the current command only when enter reaches the shell
+      this.#enterIntent = "none";
+    }
+    return handled;
+  }
+
+  // enter only accepts after the user typed into the current token or picked a suggestion, otherwise it runs the command
+  private _canAcceptWithEnter(): boolean {
+    if (this.#enterIntent == "navigated") return true;
+    const token = this.#suggestBlob?.activeToken;
+    if (this.#enterIntent != "typed" || token == null || token.complete) return false;
+    const typedText = token.isPath ? token.token.slice(token.token.lastIndexOf("/") + 1) : token.token;
+    return typedText.length > 0;
+  }
+
+  private _handleKeyPress(keyPress: KeyPress, allowBindings: boolean): boolean {
+    const { name, shift, ctrl } = keyPress;
 
     // if suggestions are hidden, keep them hidden until during command navigation
     if (this.#hideSuggestions) {
@@ -245,9 +264,14 @@ export class SuggestionManager {
       this.#hideSuggestions = true;
     } else if (name == prevKey && shift == !!prevShift && ctrl == !!prevCtrl) {
       this.#activeSuggestionIdx = Math.max(0, this.#activeSuggestionIdx - 1);
+      this.#enterIntent = "navigated";
     } else if (name == nextKey && shift == !!nextShift && ctrl == !!nextCtrl) {
       this.#activeSuggestionIdx = Math.min(this.#activeSuggestionIdx + 1, (this.#suggestBlob?.suggestions.length ?? 1) - 1);
+      this.#enterIntent = "navigated";
     } else if (name == acceptKey && shift == !!acceptShift && ctrl == !!acceptCtrl) {
+      if (name == "return" && !this._canAcceptWithEnter()) {
+        return false;
+      }
       const suggestion = this.#suggestBlob?.suggestions.at(this.#activeSuggestionIdx);
       if (suggestion == null || this.#suggestBlob?.suggestions.length == 0) {
         return false;
@@ -257,6 +281,7 @@ export class SuggestionManager {
         return false;
       }
       this.#term.write(applyReplacement(action));
+      this.#enterIntent = "none";
     } else if (name == "return" || (name == "c" && ctrl)) {
       this.#term.clearCommand();
       return false;
